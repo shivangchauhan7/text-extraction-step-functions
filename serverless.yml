@@ -1,0 +1,62 @@
+service: aws-step-functions
+
+plugins:
+- serverless-step-functions
+
+custom:
+  stateMachineName: newStateMachine
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+        - textract:DetectDocumentText
+        - s3:Get*
+        - s3:List*
+        - s3:PutObject*
+      Resource: "*"
+
+stepFunctions:
+  stateMachines:
+    newStateMachine:
+      name: ${self:custom.stateMachineName}
+      tracingConfig:
+        enabled: true
+      definition:
+        Comment: Image extraction and pdf generation
+        StartAt: extractText
+        States:
+          extractText:
+            Type: Task
+            Resource: !GetAtt extractText.Arn
+            Next: generatePdf
+          generatePdf:
+            Type: Task
+            Resource: !GetAtt generatePdf.Arn
+            End: true
+            Retry:
+            - ErrorEquals: ['States.ALL']
+              IntervalSeconds: 1
+              MaxAttempts: 3
+              BackoffRate: 2
+
+functions:
+  extractText:
+    handler: src/extractText/index.extractText
+  
+  generatePdf:
+    handler: src/generatePdf/index.generatePdf
+
+  triggerStateMachine:
+    handler: src/triggerStateMachine/index.triggerStateMachine
+    environment:
+      stateMachineName: ${self:custom.stateMachineName}
+      ACCOUNT_ID: ${aws:accountId}
+    events:
+      - s3:
+          bucket: my-bucket-34
+          event: s3:ObjectCreated:*
+          existing: true
